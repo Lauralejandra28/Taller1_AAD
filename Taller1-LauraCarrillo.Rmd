@@ -1,0 +1,133 @@
+---
+title: "Untitled"
+author: "Laura Alejandra Carrillo Guzmán."
+date: "2023-03-29"
+output: html_document
+---
+
+```{r,echo=T,warning=F,message=F}
+options(scipen=999)
+library(car)
+library(dplyr)
+library(glmnet)
+
+```
+
+#Problema.
+El conjunto de datos taller1.txt contiene la información del perfíl genómico de un conjunto de 1200 líneas celulares. Para estas se busca determinar cuáles de los 5000 genes (ubicados en cada columna) son de relevancia para la predicción de la variable respuesta (efectividad del tratamiento anticancer, medida como variable continua).
+
+```{r,echo=T,warning=F,message=F}
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+Base=read.csv("taller1.txt")
+```
+
+## Pregunta 1. 
+¿Hay multicolinealidad en los datos? Explique sucintamente.
+
+```{r,echo=T,warning=F,message=F}
+modelo_ini=lm(formula=y~., data=Base)
+summary(modelo_ini)
+#vif(modelo_ini)
+```
+
+**Rta/** Si hay presencia de multicolinealidad, dado que al ajustar el modelo de regresión linea con todas las variables explicativas se obtiene un $R^2$ de 1 y la gran mayoria de coeficientes de regresión no significativos lo que indicaría que el modelo no es capaz de identificar el efecto de cada variable explicativa por lo que entre ellas hay una fuerte correlación. Adicionalmente se intentó calcular el Factor de Inflación de Varianza (VIF) obteniendo un error que en conclusión indica que hay presencia de multicolinealidad. Lo anterior, también podría deberse a la gran cantidad de atributos que hay en la base de datos.
+
+## Pregunta 2. 
+Separe aleatoriamente (pero guarde la semilla) su conjunto de datos en dos partes:     
+- Entrenamiento: 1000 líneas celulares
+- Prueba: 200 líneas celulares.
+
+```{r,echo=T,warning=F,message=F}
+set.seed(12345)
+ids_prueba=sample(x =1:dim(Base)[1],size = 200)
+Base_prueba= Base[which(as.numeric(rownames(Base))%in% ids_prueba),]
+dim(Base_prueba)
+Base_entrenamiento= Base[which(!(as.numeric(rownames(Base))%in% ids_prueba)),]
+dim(Base_entrenamiento)
+
+X_train=as.matrix(Base_entrenamiento %>% dplyr::select(-y))
+y_train=Base_entrenamiento$y
+X_test=as.matrix(Base_prueba %>% dplyr::select(-y))
+y_test=Base_prueba$y
+```
+
+## Pregunta 3. 
+Usando los 1000 datos de entrenamiento, determine los valores de $\lambda_r$  y $\lambda_l$ de regesión ridge y lasso, respectivamente, que minimicen el error cuadrático medio (ECM) mediante validación externa. Utilice el método de validación externa que considere más apropiado.
+
+```{r,echo=T,warning=F,message=F}
+lambdas<- 10^seq(-3, 5, length.out = 200)
+ridge_model <- cv.glmnet(X_train, y_train, alpha = 0, lambda = lambdas,
+                      standardize = TRUE, nfolds = 10)
+plot(ridge_model)
+lambda_ridge <- ridge_model$lambda.min
+lambda_ridge
+```
+
+Implementando una validación cruzada con 10 folds, se obtiene que el valor de lambda para la regresión Ridge que minimiza el Error Cuadrático Medio es:
+
+```{r,echo=T,warning=F,message=F}
+lambdas <- 10^seq(-3, 5, length.out = 200)
+lasso_cv <- cv.glmnet(X_train, y_train, alpha = 1, lambda = lambdas,
+                      standardize = TRUE, nfolds = 10)
+plot(lasso_cv)
+lambda_lasso <- lasso_cv$lambda.min
+lambda_lasso
+```
+
+## Pregunta 4. 
+Ajuste la regresión ridge y lasso con los valores estimados de $\lambda_r$  y $\lambda_l$ obtenidos en **(3)** usando los 1000 datos de entrenamiento.
+
+
+```{r,echo=T,warning=F,message=F}
+modelo_ridge_final= glmnet(X_train, y_train, alpha = 0, lambda = lambda_ridge, 
+                           standardize = TRUE)
+
+modelo_lasso_final= glmnet(X_train,y_train,alpha = 1,lambda = lambda_lasso,
+                           standardize = TRUE)
+```
+
+## Pregunta 5. 
+Para los modelos ajustados en **(4)** determine el más apropiado para propósitos de predicción. Considere únicamente el ECM en los 200 datos de prueba para su decisión.
+
+```{r,echo=T,warning=F,message=F}
+pred_ridge = predict(modelo_ridge_final,newx = X_test)
+pred_lasso = predict(modelo_lasso_final,newx = X_test)
+
+plot(y=pred_ridge,x=y_test,pch=16,col="#4674A7",ylab="Efectividad predicha", 
+     xlab="Efectividad Real",main="Efectividad del tratamiento predicha Vs Real" )
+ecm_ridge= mean((y_test-pred_ridge)^2)
+cat("Error Cuadrático Medio, Regresión Ridge: ",ecm_ridge) 
+
+plot(y=pred_lasso,x=y_test,pch=16,col="#62B988",ylab="Efectividad predicha",
+     xlab="Efectividad Real", main="Efectividad del tratamiento predicha Vs Real")
+ecm_lasso= mean((y_test-pred_lasso)^2)
+cat("\n")
+cat("Error Cuadrático Medio, Regresión Lasso: ",ecm_lasso) 
+```
+
+**Rta/** El modelo con menor Error Cuadrático Medio, es el modelo de regresión Lasso con un ECM  de 1.34 con respecto al obtenido por la regresión Ridge de 19.85.
+
+## Pregunta 6.  
+Ajuste el modelo seleccionado en (5) para los 1200 datos. Note que en este punto ya tiene un $\lambda$ estimado y un modelo seleccionado.
+
+```{r,echo=T,warning=F,message=F}
+X= as.matrix(Base %>% dplyr::select(-y))
+X = as.matrix(Base %>% dplyr::select(V1,V2,V3,V4,V5,V6,V7,V8,V9,V10))
+y= Base$y
+Modelo_final= glmnet(X,y,alpha = 1,lambda = lambda_lasso,
+                     standardize = TRUE)
+```
+
+## Pregunta 7. 
+Grafique las trazas de los coeficientes en función de la penalización para el modelo ajustado en **(6)**.
+
+
+```{r,echo=T,warning=F,message=F}
+Modelo_seleccionado <- glmnet(X, y, alpha = 1, lambda = lambdas, standardize = FALSE)
+plot(Modelo_seleccionado, xvar = "lambda")
+```
+
+## Pregunta 8.  
+En un párrafo resuma los resultados obtenidos dado el objetivo inicial del estudio.
+
+Se obtiene muy buenos resultados predictivos con el modelo de regresión Lasso con un parámetro lambda igual a , calculado a partir de una validación cruzada con 10 divisiones (k=10). Posteriormente se entrenó el modelo con los 1.000 registros de entrenamientoas y al evaluar su rendimiento predictivo con la base de prueba compuesta por 200 registros se obtiene un Error Cuadrático Medio (ECM por sus siglas) considerablemente pequeño con respecto al obtenido por la regresión Ridge, precisamente del 1.34 y 19.85 respectivamente. De igual manera sus buenos resultados predictivos también se visualizan en el gráfico de dispersión que relaciona la efectividad predicha y la real, ajustandose muy bien ambos. En conclusión, la calibración del parámetro lambda de la regresión Lasso resulta dar muy buenas predicciones de la efectividad del tratamiento anticancer.
